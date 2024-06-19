@@ -1,28 +1,50 @@
-import * as net from "net";
+import * as net from "node:net";
 
-const server = net.createServer((socket: any) => {
-  socket.on("data", (data: any) => {
-    const dataStr = data.toString();
-    const path = dataStr.split("\r\n")[0].split(" ")[1];
-    const query = path.split("/")[2];
+const server = net.createServer((socket) => {
+  socket.on("data", (data) => {
+    const request = data.toString();
+    const path = request.split(" ")[1];
+    const params = path.split("/")[1];
 
-    if (path === "/") {
-      socket.write("HTTP/1.1 200 OK\r\n\r\n");
-    } else if (path === "/user-agent") {
-      socket.write(
-        `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${socket.remoteAddress.length}\r\n\r\n${socket.remoteAddress}`
-      );
-    } else if (path === `/echo/${query}`) {
-      socket.write(
-        `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${query.length}\r\n\r\n${query}`
-      );
-    } else {
-      socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+    let response: string;
+
+    function changeResponse(response: string): void {
+      socket.write(response);
+      socket.end();
     }
 
-    console.log("Client diconnecting");
+    switch (params) {
+      case "": {
+        response = "HTTP/1.1 200 OK\r\n\r\n";
+        changeResponse(response);
+        break;
+      }
+
+      case "echo": {
+        const message = path.split("/")[2];
+        response = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${message.length}\r\n\r\n${message}`;
+        changeResponse(response);
+        break;
+      }
+
+      case "user-agent": {
+        const userAgent = request.split("User-Agent: ")[1].split("\r\n")[0];
+        response = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${userAgent.length}\r\n\r\n${userAgent}`;
+        changeResponse(response);
+        break;
+      }
+
+      default: {
+        response = "HTTP/1.1 404 Not Found\r\n\r\n";
+        changeResponse(response);
+        break;
+      }
+    }
+
     socket.end();
   });
 });
 
-server.listen(4221, "localhost", () => console.log("Server is running on port 4221"));
+server.listen(4221, "localhost", () => {
+  console.log("Server is running on port 4221");
+});
