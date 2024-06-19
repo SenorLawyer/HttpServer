@@ -68,15 +68,9 @@ const server = net.createServer((socket) => {
               return;
             }
 
-            response = [
-              "HTTP/1.1 200 OK",
-              "Content-Type: application/octet-stream",
-              `Content-Length: ${content.length}`,
-              "\r\n",
-              content,
-            ].join("\r\n");
-
+            response = `HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${content.length}\r\n\r\n`;
             socket.write(response);
+            socket.write(content);
             socket.end();
           });
         });
