@@ -4,10 +4,10 @@ import * as path from "path";
 
 const args = process.argv.slice(2);
 const dirIndex = args.indexOf("--directory");
-if (dirIndex === -1 || dirIndex + 1 >= args.length) {
-  console.error("Usage: ./your_server.sh --directory <directory>");
-  process.exit(1);
-}
+// if (dirIndex === -1 || dirIndex + 1 >= args.length) {
+//   console.error("Usage: ./your_server.sh --directory <directory>");
+//   process.exit(1);
+// }
 const filesDirectory = args[dirIndex + 1];
 
 const server = net.createServer((socket) => {
