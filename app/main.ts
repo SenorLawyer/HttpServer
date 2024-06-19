@@ -32,7 +32,8 @@ const server = net.createServer((socket: net.Socket) => {
         );
       }
     } else if (requestPath === "/user-agent") {
-      const userAgent = headers!.find((header) => header.startsWith("User-Agent")).split(": ")[1];
+      const userAgent =
+        headers?.find((header) => header.startsWith("User-Agent"))?.split(": ")[1] || "";
 
       socket.write(
         `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${userAgent.length}\r\n\r\n${userAgent}`
