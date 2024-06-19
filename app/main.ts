@@ -1,22 +1,26 @@
 import * as net from "net";
 
-const server = net.createServer((socket) => {
-  socket.on("data", (data) => {
-    const request = data.toString();
-    const path = request.split(" ")[1];
+const server = net.createServer((socket: any) => {
+  socket.on("data", (data: any) => {
+    const dataStr = data.toString();
+    const path = dataStr.split("\r\n")[0].split(" ")[1];
+    const query = path.split("/")[2];
 
-    console.log(`Request: ${path}`);
-
-    let response = "HTTP/1.1 404 Not Found\r\n\r\n";
     if (path === "/") {
-      response = "HTTP/1.1 200 OK\r\n\r\n";
-    } else if (path.startsWith("/echo/") && path.length > 6) {
-      response = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${
-        path.length - 6
-      }\r\n\r\n${path.slice(6)}`;
+      socket.write("HTTP/1.1 200 OK\r\n\r\n");
+    } else if (path === "/user-agent") {
+      socket.write(
+        `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${socket.remoteAddress.length}\r\n\r\n${socket.remoteAddress}`
+      );
+    } else if (path === `/echo/${query}`) {
+      socket.write(
+        `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${query.length}\r\n\r\n${query}`
+      );
+    } else {
+      socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
     }
 
-    socket.write(response);
+    console.log("Client diconnecting");
     socket.end();
   });
 });
