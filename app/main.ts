@@ -9,6 +9,7 @@ const server = net.createServer((socket) => {
     const request = data.toString();
     const path = request.split(" ")[1];
 
+    console.log(`Request received for path: ${path}`);
     const response = path === "/" ? "HTTP/1.1 200 OK\r\n\r\n" : "HTTP/1.1 404 Not Found\r\n\r\n";
 
     socket.write(response);
