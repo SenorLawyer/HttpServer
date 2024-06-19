@@ -17,48 +17,45 @@ const server = net.createServer((socket: net.Socket) => {
       socket.write("HTTP/1.1 200 OK\r\n\r\n");
     } else if (path.startsWith("/echo/")) {
       const message = path.split("/")[2];
-      const reqBody = data.toString().split("\r\n");
-      const encoding = reqBody.filter((header) => header.includes("Accept-Encoding"));
-      const acceptEncoding = encoding.length > 0 ? encoding[0].split(": ")[1] : "";
+      const reqHeaders = data.toString().split("\r\n");
+      const acceptEncodingHeader = reqHeaders.find((header) =>
+        header.startsWith("Accept-Encoding")
+      );
+      const acceptEncoding = acceptEncodingHeader ? acceptEncodingHeader.split(": ")[1] : "";
 
       const buffer = Buffer.from(message, "utf8");
-      const zipped = zlib.gzipSync(buffer);
-
-      console.log(zipped);
 
       if (acceptEncoding.includes("gzip")) {
+        const zipped = zlib.gzipSync(buffer);
+
         socket.write(
-          `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: ${zipped.length}\r\n\r\n${zipped}`
+          `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: ${zipped.length}\r\n\r\n`
         );
-
-        // socket.write(
-        //   `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: ${zipped.length}\r\n\r\n`
-        // );
-
-        // socket.write();
+        socket.write(zipped);
       } else {
         socket.write(
-          `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${message.length}\r\n\r\n${message}`
+          `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${buffer.length}\r\n\r\n${message}`
         );
       }
     } else if (path === "/user-agent") {
-      const userAgent = data
-        .toString()
-        .split("\r\n")
-        .filter((header) => header.includes("User-Agent"))[0]
-        .split(": ")[1];
+      const userAgent =
+        data
+          .toString()
+          .split("\r\n")
+          .find((header) => header.startsWith("User-Agent"))
+          ?.split(": ")[1] || "";
 
       socket.write(
         `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${userAgent.length}\r\n\r\n${userAgent}`
       );
-    } else if (path.startsWith("/files/") && method == "POST") {
+    } else if (path.startsWith("/files/") && method === "POST") {
       const fileName = path.split("/")[2];
       const parts = data.toString().split("\r\n\r\n");
-      const reqBody = parts.pop();
+      const reqBody = parts.pop() || "";
 
-      writeFile(fileName, reqBody || "");
+      writeFile(fileName, reqBody);
 
-      socket.write(`HTTP/1.1 201 Created\r\n\r\n`);
+      socket.write("HTTP/1.1 201 Created\r\n\r\n");
     } else if (path.startsWith("/files/")) {
       const fileName = path.split("/")[2];
       const dir = argv[argv.length - 1];
