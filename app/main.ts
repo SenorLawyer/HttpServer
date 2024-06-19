@@ -5,10 +5,16 @@ const server = net.createServer((socket) => {
     const request = data.toString();
     const path = request.split(" ")[1];
 
-    const response =
-      path.startsWith("/") && path.length > 1
-        ? "HTTP/1.1 404 Not Found\r\n\r\n"
-        : "HTTP/1.1 200 OK\r\n\r\n";
+    console.log(`Request: ${path}`);
+
+    let response = "HTTP/1.1 404 Not Found\r\n\r\n";
+    if (path === "/") {
+      response = "HTTP/1.1 200 OK\r\n\r\n";
+    } else if (path.startsWith("/echo/") && path.length > 6) {
+      response = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${
+        path.length - 6
+      }\r\n\r\n${path.slice(6)}`;
+    }
 
     socket.write(response);
     socket.end();
