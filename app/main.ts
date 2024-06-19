@@ -1,10 +1,20 @@
 import * as net from "node:net";
+import * as fs from "fs";
+import * as path from "path";
+
+const args = process.argv.slice(2);
+const dirIndex = args.indexOf("--directory");
+if (dirIndex === -1 || dirIndex + 1 >= args.length) {
+  console.error("Usage: ./your_server.sh --directory <directory>");
+  process.exit(1);
+}
+const filesDirectory = args[dirIndex + 1];
 
 const server = net.createServer((socket) => {
   socket.on("data", (data) => {
     const request = data.toString();
-    const path = request.split(" ")[1];
-    const params = path.split("/")[1];
+    const [method, requestPath] = request.split(" ");
+    const parts = requestPath.split("/");
 
     let response: string;
 
@@ -13,7 +23,13 @@ const server = net.createServer((socket) => {
       socket.end();
     }
 
-    switch (params) {
+    if (method !== "GET") {
+      response = "HTTP/1.1 405 Method Not Allowed\r\n\r\n";
+      changeResponse(response);
+      return;
+    }
+
+    switch (parts[1]) {
       case "": {
         response = "HTTP/1.1 200 OK\r\n\r\n";
         changeResponse(response);
@@ -21,7 +37,7 @@ const server = net.createServer((socket) => {
       }
 
       case "echo": {
-        const message = path.split("/")[2];
+        const message = parts[2];
         response = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${message.length}\r\n\r\n${message}`;
         changeResponse(response);
         break;
@@ -34,14 +50,45 @@ const server = net.createServer((socket) => {
         break;
       }
 
+      case "files": {
+        const filename = parts.slice(2).join("/");
+        const filePath = path.join(filesDirectory, filename);
+
+        fs.stat(filePath, (err, stats) => {
+          if (err || !stats.isFile()) {
+            response = "HTTP/1.1 404 Not Found\r\n\r\n";
+            changeResponse(response);
+            return;
+          }
+
+          fs.readFile(filePath, (err, content) => {
+            if (err) {
+              response = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
+              changeResponse(response);
+              return;
+            }
+
+            response = [
+              "HTTP/1.1 200 OK",
+              "Content-Type: application/octet-stream",
+              `Content-Length: ${content.length}`,
+              "\r\n",
+              content,
+            ].join("\r\n");
+
+            socket.write(response);
+            socket.end();
+          });
+        });
+        break;
+      }
+
       default: {
         response = "HTTP/1.1 404 Not Found\r\n\r\n";
         changeResponse(response);
         break;
       }
     }
-
-    socket.end();
   });
 });
 
