@@ -1,160 +1,91 @@
-import { Socket } from "net";
+import * as net from "net";
+import { argv } from "process";
+import { readFileSync, writeFileSync } from "fs";
+import * as path from "path";
+import * as zlib from "zlib";
 
-import * as fs from "fs";
+const directory = process.argv[3];
 
-export default class HTTPHandler {
-  private readonly directoryPath: string;
+const server = net.createServer((socket: net.Socket) => {
+  socket.on("data", (data) => {
+    console.log(data);
+    console.log(data.toString());
 
-  constructor(directoryPath: string) {
-    this.directoryPath = directoryPath;
-  }
+    const [method, path, version] = data.toString().split("\r\n")[0].split(" ");
 
-  private extractHeaders(request: string): { [key: string]: string } {
-    const headers: { [key: string]: string } = {};
-    const lines = request.split("\r\n");
+    if (path === "/") {
+      socket.write("HTTP/1.1 200 OK\r\n\r\n");
+    } else if (path.startsWith("/echo/")) {
+      const message = path.split("/")[2];
+      const reqBody = data.toString().split("\r\n");
+      const encoding = reqBody.filter((header) => header.includes("Accept-Encoding"));
+      const acceptEncoding = encoding.length > 0 ? encoding[0].split(": ")[1] : "";
 
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i] === "") {
-        break;
+      const buffer = Buffer.from(message, "utf8");
+      const zipped = zlib.gzipSync(buffer);
+
+      if (acceptEncoding.includes("gzip")) {
+        socket.write(
+          `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: ${message.length}\r\n\r\n${message}`
+        );
+
+        socket.write(
+          `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: ${zipped.length}\r\n\r\n`
+        );
+
+        socket.write(zipped);
+      } else {
+        socket.write(
+          `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${message.length}\r\n\r\n${message}`
+        );
       }
+    } else if (path === "/user-agent") {
+      const userAgent = data
+        .toString()
+        .split("\r\n")
+        .filter((header) => header.includes("User-Agent"))[0]
+        .split(": ")[1];
 
-      const [key, value] = lines[i].split(": ");
-      headers[key] = value;
-    }
+      socket.write(
+        `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${userAgent.length}\r\n\r\n${userAgent}`
+      );
+    } else if (path.startsWith("/files/") && method == "POST") {
+      const fileName = path.split("/")[2];
+      const parts = data.toString().split("\r\n\r\n");
+      const reqBody = parts.pop();
 
-    return headers;
-  }
+      writeFile(fileName, reqBody || "");
 
-  private extractPath(request: string): {
-    method: string;
-    path: string[];
-    protocol: string;
-  } {
-    const lines = request.split("\r\n");
-    const [method, path, protocol] = lines[0].split(" ");
+      socket.write(`HTTP/1.1 201 Created\r\n\r\n`);
+    } else if (path.startsWith("/files/")) {
+      const fileName = path.split("/")[2];
+      const dir = argv[argv.length - 1];
 
-    return {
-      method,
-      path: path.split("/").filter((value) => value !== ""),
-      protocol,
-    };
-  }
+      try {
+        const file = readFileSync(`${dir}/${fileName}`, "utf8");
 
-  private extractBody(request: string): string {
-    const lines = request.split("\r\n");
-
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i] === "") {
-        return lines.slice(i + 1).join("\r\n");
-      }
-    }
-
-    return "";
-  }
-
-  private formHTTPResponse(
-    statusCode: number,
-    statusString?: string,
-    body?: string,
-    headers?: { [key: string]: string }
-  ): string {
-    let response = `HTTP/1.1 ${statusCode} ${statusString || ""}\r\n`;
-
-    if (headers) {
-      for (const key in headers) {
-        response += `${key}: ${headers[key]}\r\n`;
-      }
-    }
-
-    if (body) {
-      response += `Content-Length: ${body.length}\r\n`;
-      response += "\r\n";
-      response += body;
-    }
-
-    response += "\r\n";
-    return response;
-  }
-
-  handleRawRequest(request: Socket): void {
-    console.log("Received request");
-
-    request.on("data", (data) => {
-      const requestString = data.toString();
-      const headers = this.extractHeaders(requestString);
-      const { method, path, protocol } = this.extractPath(requestString);
-      const body = this.extractBody(requestString);
-
-      const isValidContentEncoding =
-        headers["Accept-Encoding"] === "gzip" ||
-        headers["Accept-Encoding"] === "deflate" ||
-        headers["Accept-Encoding"] === "br" ||
-        headers["Accept-Encoding"] === "zstd";
-
-      console.log("Request headers:", headers);
-      console.log("Request method:", method);
-      console.log("Request path:", path);
-      console.log("Request protocol:", protocol);
-      console.log("Request body:", body);
-
-      let response;
-
-      switch (path[0]) {
-        case "echo":
-          response = this.formHTTPResponse(200, "OK", path[1], {
-            "Content-Type": "text/plain",
-
-            ...(isValidContentEncoding && {
-              "Content-Encoding": headers["Accept-Encoding"],
-            }),
-          });
-
-          break;
-        case "user-agent":
-          response = this.formHTTPResponse(200, "OK", headers["User-Agent"], {
-            "Content-Type": "text/plain",
-          });
-
-          break;
-        case "files": {
-          if (method === "GET") {
-            const filename = path[1];
-            const dir = fs.readdirSync(this.directoryPath);
-
-            if (dir.includes(filename)) {
-              const file = fs.readFileSync(`${this.directoryPath}/${filename}`);
-
-              response = this.formHTTPResponse(200, "OK", file.toString(), {
-                "Content-Type": "application/octet-stream",
-              });
-            } else {
-              response = this.formHTTPResponse(404, "Not Found");
-            }
-          } else if (method === "POST") {
-            const filename = path[1];
-
-            fs.writeFileSync(`${this.directoryPath}/${filename}`, body);
-
-            response = this.formHTTPResponse(201, "Created");
-          }
-
-          break;
+        if (file) {
+          socket.write(
+            `HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${file.length}\r\n\r\n${file}`
+          );
+        } else {
+          socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
         }
-
-        default:
-          if (path.length === 1) {
-            response = this.formHTTPResponse(404, "Not Found");
-          } else {
-            response = this.formHTTPResponse(200, "OK", path[1], {
-              "Content-Type": "text/plain",
-            });
-          }
+      } catch {
+        socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
       }
+    } else {
+      socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+    }
 
-      console.log("Sending response:", response);
-      request.write(response || "");
-      request.end();
-      console.log("Sent response and closed connection");
-    });
-  }
+    socket.end();
+  });
+});
+
+function writeFile(filename: string, contents: string) {
+  writeFileSync(path.join(directory, filename), contents);
 }
+
+server.listen(4221, "localhost", () => {
+  console.log("Server is running on port 4221");
+});
