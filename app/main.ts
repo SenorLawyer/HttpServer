@@ -1,114 +1,160 @@
-import * as net from "node:net";
+import { Socket } from "net";
+
 import * as fs from "fs";
-import * as path from "path";
 
-const args = process.argv.slice(2);
-const dirIndex = args.indexOf("--directory");
-// if (dirIndex === -1 || dirIndex + 1 >= args.length) {
-//   console.error("Usage: ./your_server.sh --directory <directory>");
-//   process.exit(1);
-// }
-const filesDirectory = args[dirIndex + 1];
+export default class HTTPHandler {
+  private readonly directoryPath: string;
 
-const server = net.createServer((socket) => {
-  socket.on("data", (data) => {
-    const request = data.toString();
-    const [method, requestPath] = request.split(" ");
-    const parts = requestPath.split("/");
+  constructor(directoryPath: string) {
+    this.directoryPath = directoryPath;
+  }
 
-    let response: string;
+  private extractHeaders(request: string): { [key: string]: string } {
+    const headers: { [key: string]: string } = {};
+    const lines = request.split("\r\n");
 
-    function changeResponse(response: string): void {
-      socket.write(response);
-      socket.end();
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i] === "") {
+        break;
+      }
+
+      const [key, value] = lines[i].split(": ");
+      headers[key] = value;
     }
 
-    if (method === "GET") {
-      switch (parts[1]) {
-        case "": {
-          response = "HTTP/1.1 200 OK\r\n\r\n";
-          changeResponse(response);
-          break;
-        }
+    return headers;
+  }
 
-        case "echo": {
-          const message = parts[2];
-          response = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${message.length}\r\n\r\n${message}`;
-          changeResponse(response);
-          break;
-        }
+  private extractPath(request: string): {
+    method: string;
+    path: string[];
+    protocol: string;
+  } {
+    const lines = request.split("\r\n");
+    const [method, path, protocol] = lines[0].split(" ");
 
-        case "user-agent": {
-          const userAgent = request.split("User-Agent: ")[1].split("\r\n")[0];
-          response = `HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${userAgent.length}\r\n\r\n${userAgent}`;
-          changeResponse(response);
-          break;
-        }
+    return {
+      method,
+      path: path.split("/").filter((value) => value !== ""),
+      protocol,
+    };
+  }
 
+  private extractBody(request: string): string {
+    const lines = request.split("\r\n");
+
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i] === "") {
+        return lines.slice(i + 1).join("\r\n");
+      }
+    }
+
+    return "";
+  }
+
+  private formHTTPResponse(
+    statusCode: number,
+    statusString?: string,
+    body?: string,
+    headers?: { [key: string]: string }
+  ): string {
+    let response = `HTTP/1.1 ${statusCode} ${statusString || ""}\r\n`;
+
+    if (headers) {
+      for (const key in headers) {
+        response += `${key}: ${headers[key]}\r\n`;
+      }
+    }
+
+    if (body) {
+      response += `Content-Length: ${body.length}\r\n`;
+      response += "\r\n";
+      response += body;
+    }
+
+    response += "\r\n";
+    return response;
+  }
+
+  handleRawRequest(request: Socket): void {
+    console.log("Received request");
+
+    request.on("data", (data) => {
+      const requestString = data.toString();
+      const headers = this.extractHeaders(requestString);
+      const { method, path, protocol } = this.extractPath(requestString);
+      const body = this.extractBody(requestString);
+
+      const isValidContentEncoding =
+        headers["Accept-Encoding"] === "gzip" ||
+        headers["Accept-Encoding"] === "deflate" ||
+        headers["Accept-Encoding"] === "br" ||
+        headers["Accept-Encoding"] === "zstd";
+
+      console.log("Request headers:", headers);
+      console.log("Request method:", method);
+      console.log("Request path:", path);
+      console.log("Request protocol:", protocol);
+      console.log("Request body:", body);
+
+      let response;
+
+      switch (path[0]) {
+        case "echo":
+          response = this.formHTTPResponse(200, "OK", path[1], {
+            "Content-Type": "text/plain",
+
+            ...(isValidContentEncoding && {
+              "Content-Encoding": headers["Accept-Encoding"],
+            }),
+          });
+
+          break;
+        case "user-agent":
+          response = this.formHTTPResponse(200, "OK", headers["User-Agent"], {
+            "Content-Type": "text/plain",
+          });
+
+          break;
         case "files": {
-          const filename = parts.slice(2).join("/");
-          const filePath = path.join(filesDirectory, filename);
+          if (method === "GET") {
+            const filename = path[1];
+            const dir = fs.readdirSync(this.directoryPath);
 
-          fs.stat(filePath, (err, stats) => {
-            if (err || !stats.isFile()) {
-              response = "HTTP/1.1 404 Not Found\r\n\r\n";
-              changeResponse(response);
-              return;
+            if (dir.includes(filename)) {
+              const file = fs.readFileSync(`${this.directoryPath}/${filename}`);
+
+              response = this.formHTTPResponse(200, "OK", file.toString(), {
+                "Content-Type": "application/octet-stream",
+              });
+            } else {
+              response = this.formHTTPResponse(404, "Not Found");
             }
+          } else if (method === "POST") {
+            const filename = path[1];
 
-            fs.readFile(filePath, (err, content) => {
-              if (err) {
-                response = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
-                changeResponse(response);
-                return;
-              }
+            fs.writeFileSync(`${this.directoryPath}/${filename}`, body);
 
-              response = `HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: ${content.length}\r\n\r\n`;
-              socket.write(response);
-              socket.write(content);
-              socket.end();
+            response = this.formHTTPResponse(201, "Created");
+          }
+
+          break;
+        }
+
+        default:
+          if (path.length === 1) {
+            response = this.formHTTPResponse(404, "Not Found");
+          } else {
+            response = this.formHTTPResponse(200, "OK", path[1], {
+              "Content-Type": "text/plain",
             });
-          });
-          break;
-        }
-
-        default: {
-          response = "HTTP/1.1 404 Not Found\r\n\r\n";
-          changeResponse(response);
-          break;
-        }
+          }
       }
-    } else if (method === "POST") {
-      switch (parts[1]) {
-        case "files": {
-          const filename = parts.slice(2).join("/");
-          const filePath = path.join(filesDirectory, filename);
-          const body = request.split("\r\n\r\n")[1];
 
-          fs.writeFile(filePath, body, (err) => {
-            if (err) {
-              response = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
-              changeResponse(response);
-              return;
-            }
-
-            response = "HTTP/1.1 201 Created\r\n\r\n";
-            changeResponse(response);
-          });
-
-          break;
-        }
-
-        default: {
-          response = "HTTP/1.1 404 Not Found\r\n\r\n";
-          changeResponse(response);
-          break;
-        }
-      }
-    }
-  });
-});
-
-server.listen(4221, "localhost", () => {
-  console.log("Server is running on port 4221");
-});
+      console.log("Sending response:", response);
+      request.write(response || "");
+      request.end();
+      console.log("Sent response and closed connection");
+    });
+  }
+}
