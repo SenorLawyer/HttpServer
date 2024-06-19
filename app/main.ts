@@ -73,8 +73,7 @@ const server = net.createServer((socket) => {
               "Content-Type: application/octet-stream",
               `Content-Length: ${content.length}`,
               "\r\n",
-              content,
-            ].join("\r\n");
+            ].join(`\r\n${content}`);
 
             socket.write(response);
             socket.end();
